@@ -3,6 +3,110 @@
 /**
  * PRODUCT SIZE VARIATION SELECTION
  */
+
+/**
+ * AJAX handler for the wholesale matrix multi-variation add-to-cart request.
+ */
+if (!function_exists('tta_add_multi_variations_to_cart')) {
+    function tta_add_multi_variations_to_cart() {
+        if (!function_exists('WC') || !function_exists('wc_get_product')) {
+            wp_send_json_error(['message' => 'WooCommerce is not available.'], 500);
+        }
+
+        if (!is_user_logged_in()) {
+            wp_send_json_error(['message' => 'Please log in to order.'], 401);
+        }
+
+        if (!check_ajax_referer('tta_add_multi_variations', 'nonce', false)) {
+            wp_send_json_error(['message' => 'Security check failed. Please refresh the page and try again.'], 403);
+        }
+
+        if (null === WC()->cart && function_exists('wc_load_cart')) {
+            wc_load_cart();
+        }
+
+        if (null === WC()->cart) {
+            wp_send_json_error(['message' => 'WooCommerce cart is not available.'], 500);
+        }
+
+        $product_id = isset($_POST['product_id']) ? absint(wp_unslash($_POST['product_id'])) : 0;
+        $items_raw  = isset($_POST['items']) ? wp_unslash($_POST['items']) : '';
+        $items      = json_decode($items_raw, true);
+
+        if (!$product_id || !is_array($items) || empty($items)) {
+            wp_send_json_error(['message' => 'No valid variations were submitted.'], 400);
+        }
+
+        $product = wc_get_product($product_id);
+        if (!$product || !$product->is_type('variable')) {
+            wp_send_json_error(['message' => 'This product is not available for matrix ordering.'], 400);
+        }
+
+        $added_count = 0;
+        $errors      = [];
+
+        foreach ($items as $item) {
+            $variation_id = isset($item['variation_id']) ? absint($item['variation_id']) : 0;
+            $quantity     = isset($item['quantity']) ? wc_stock_amount($item['quantity']) : 0;
+
+            if (!$variation_id || $quantity <= 0) {
+                continue;
+            }
+
+            $variation = wc_get_product($variation_id);
+            if (!$variation || !$variation->is_type('variation') || (int) $variation->get_parent_id() !== $product_id) {
+                $errors[] = 'One selected variation is no longer available.';
+                continue;
+            }
+
+            if (!$variation->is_purchasable() || !$variation->is_in_stock()) {
+                $errors[] = sprintf('%s is not available to purchase.', $variation->get_name());
+                continue;
+            }
+
+            $variation_data = [];
+            if (isset($item['attributes']) && is_array($item['attributes'])) {
+                foreach ($item['attributes'] as $key => $value) {
+                    $attribute_key = sanitize_key($key);
+                    if (0 !== strpos($attribute_key, 'attribute_')) {
+                        continue;
+                    }
+
+                    $variation_data[$attribute_key] = sanitize_title(wp_unslash($value));
+                }
+            }
+
+            if (empty($variation_data)) {
+                foreach ($variation->get_variation_attributes() as $key => $value) {
+                    $variation_data[sanitize_key($key)] = sanitize_title($value);
+                }
+            }
+
+            $cart_item_key = WC()->cart->add_to_cart($product_id, $quantity, $variation_id, $variation_data);
+            if ($cart_item_key) {
+                $added_count += $quantity;
+            } else {
+                $errors[] = sprintf('%s could not be added to the cart.', $variation->get_name());
+            }
+        }
+
+        if (!$added_count) {
+            wp_send_json_error([
+                'message' => !empty($errors) ? implode(' ', array_unique($errors)) : 'Could not add to cart.',
+            ], 400);
+        }
+
+        wp_send_json_success([
+            'message'     => sprintf(_n('%d item added to cart.', '%d items added to cart.', $added_count, 'woocommerce'), $added_count),
+            'added_count' => $added_count,
+            'errors'      => array_values(array_unique($errors)),
+        ]);
+    }
+}
+
+add_action('wp_ajax_tta_add_multi_variations', 'tta_add_multi_variations_to_cart');
+add_action('wp_ajax_nopriv_tta_add_multi_variations', 'tta_add_multi_variations_to_cart');
+
 /**
  * [tta_wholesale_color_size_matrix color_tax="pa_color" size_tax="pa_size"]
  * Combined SSP swatches + size matrix + multi-add-to-cart + "All colors" accordion mode.
@@ -628,14 +732,18 @@ add_shortcode('tta_wholesale_color_size_matrix', function($atts){
                     })
                 });
 
-                const data = await res.json();
-                if(!data || !data.success){
-                    setMsg((data && data.data && data.data.message) ? data.data.message : 'Could not add to cart.');
+                const responseText = await res.text();
+                let data = null;
+                try { data = responseText ? JSON.parse(responseText) : null; } catch(e) { data = null; }
+
+                if(!res.ok || !data || !data.success){
+                    const serverMessage = data && data.data && data.data.message;
+                    setMsg(serverMessage || (responseText && responseText !== '0' ? responseText : 'Could not add to cart.'));
                     addBtn.disabled = false;
                     return;
                 }
 
-                setMsg('Added to cart!');
+                setMsg((data.data && data.data.message) ? data.data.message : 'Added to cart!');
 
                 if(allMode && allGrid){
                     allGrid.querySelectorAll('.tta-wm-input').forEach(i => { if(!i.disabled) i.value = ''; });
@@ -646,7 +754,11 @@ add_shortcode('tta_wholesale_color_size_matrix', function($atts){
                     });
                 }
 
-                document.body && document.body.dispatchEvent(new Event('wc_fragment_refresh'));
+                if(window.jQuery){
+                    window.jQuery(document.body).trigger('wc_fragment_refresh');
+                }else if(document.body){
+                    document.body.dispatchEvent(new Event('wc_fragment_refresh'));
+                }
                 addBtn.disabled = false;
 
             } catch(e){

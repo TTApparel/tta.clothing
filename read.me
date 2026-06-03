@@ -1,0 +1,75 @@
+# Product Size Variation Selection Snippet
+
+## Purpose
+
+`product-size-variation-selection.code-snippets.php` defines the `[tta_wholesale_color_size_matrix]` shortcode for WooCommerce variable products. The shortcode renders a wholesale-style color and size ordering matrix so logged-in customers can enter quantities for multiple product variations and add them to the cart in one action.
+
+## Expected WooCommerce Context
+
+- The shortcode is intended for WooCommerce variable products only.
+- Products must have both a color attribute taxonomy and a size attribute taxonomy.
+- The default attribute taxonomies are:
+  - Color: `pa_color`
+  - Size: `pa_size`
+- These taxonomy names can be overridden through shortcode attributes, for example:
+
+```text
+[tta_wholesale_color_size_matrix color_tax="pa_color" size_tax="pa_size"]
+```
+
+## Main Behavior
+
+1. The shortcode exits without output if WooCommerce is unavailable, the current product is not variable, or the required color/size terms are missing.
+2. It loads the product's available variations and only displays colors that are actually present in those variations.
+3. It attempts to resolve each color swatch image from term metadata named `ssp_attribute_options_pa_color`, which appears to come from an SSP swatch/attribute plugin.
+4. It renders color swatches at the top of the component.
+5. It auto-selects the first available color after page load.
+6. In the default single-color view, selecting a swatch updates the size matrix for that color.
+7. Each size tile displays:
+   - Size label.
+   - Available quantity or stock status.
+   - Variation price for logged-in users.
+   - Quantity input for purchasable in-stock variations.
+8. A customer can enter quantities for multiple sizes of the selected color and add those variations to the cart together.
+9. A "View all colors" toggle switches to an accordion view where every color gets its own expandable size matrix.
+10. In all-colors mode, a customer can enter quantities across multiple colors and sizes, then add all selected variations to the cart together.
+11. Guest users can view the matrix, but prices are hidden and add-to-cart attempts show a login prompt.
+12. Successful add-to-cart requests clear the quantity inputs and trigger a WooCommerce fragment refresh event.
+
+## Front-End Structure
+
+The snippet outputs the complete front-end component inline:
+
+- HTML for swatches, the single-color matrix, and the all-colors accordion container.
+- Scoped CSS tied to a generated unique component ID so multiple shortcode instances should not share styles accidentally.
+- Inline JavaScript that reads embedded variation JSON, updates the UI, validates quantities, and submits add-to-cart requests.
+
+## Add-to-Cart Flow
+
+The JavaScript posts selected variation items to WordPress AJAX using:
+
+- AJAX action: `tta_add_multi_variations`
+- Registered handlers: `wp_ajax_tta_add_multi_variations` and `wp_ajax_nopriv_tta_add_multi_variations`
+- Nonce action: `tta_add_multi_variations`
+- Payload fields:
+  - `product_id`
+  - `items`, as JSON containing variation IDs, quantities, and variation attributes
+
+This file now defines both the shortcode UI/client-side submit behavior and the server-side `tta_add_multi_variations` AJAX handler. The handler verifies the nonce, requires a logged-in user, validates that each submitted variation belongs to the displayed variable product, adds valid quantities to the WooCommerce cart, and returns JSON success/error messages for the matrix UI.
+
+## Current Implementation Notes
+
+- Swatch image lookup is hard-coded to the `ssp_attribute_options_pa_color` term meta key, even though the shortcode accepts a configurable `color_tax` value.
+- The all-colors accordion builds size labels from the size slug converted to uppercase, while the single-color view uses the WooCommerce term display name.
+- Price display is hidden for guests with CSS, but price HTML is still present in the page markup/variation JSON.
+- Quantity limits are reflected in the single-color inputs through the `max` attribute when WooCommerce supplies a finite `max_qty`; the all-colors inputs currently do not set a `max` attribute.
+- The snippet uses inline CSS and JavaScript, which is convenient for a Code Snippets-style deployment but may be harder to maintain than separate enqueued assets.
+
+## Change Log
+
+### 2026-06-03
+
+- Added this `read.me` file to document the snippet's current purpose, behavior, assumptions, and implementation notes.
+
+- Added the missing `tta_add_multi_variations` WordPress AJAX handler so logged-in matrix submissions no longer fall through to `admin-ajax.php` as a bad request.
+- Improved front-end AJAX response parsing so HTTP error responses with JSON messages are shown in `.tta-wm-msg`, successful responses can show the server-provided item count, and WooCommerce cart fragments are refreshed through the standard jQuery event when available.
