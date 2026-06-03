@@ -49,12 +49,13 @@ The snippet outputs the complete front-end component inline:
 The JavaScript posts selected variation items to WordPress AJAX using:
 
 - AJAX action: `tta_add_multi_variations`
+- Registered handlers: `wp_ajax_tta_add_multi_variations` and `wp_ajax_nopriv_tta_add_multi_variations`
 - Nonce action: `tta_add_multi_variations`
 - Payload fields:
   - `product_id`
   - `items`, as JSON containing variation IDs, quantities, and variation attributes
 
-This file defines the shortcode UI and client-side submit behavior. It does not define the server-side `tta_add_multi_variations` AJAX handler, so that handler must exist elsewhere for cart additions to work.
+This file now defines both the shortcode UI/client-side submit behavior and the server-side `tta_add_multi_variations` AJAX handler. The handler verifies the nonce, requires a logged-in user, validates that each submitted variation belongs to the displayed variable product, adds valid quantities to the WooCommerce cart, and returns JSON success/error messages for the matrix UI.
 
 ## Current Implementation Notes
 
@@ -69,3 +70,6 @@ This file defines the shortcode UI and client-side submit behavior. It does not 
 ### 2026-06-03
 
 - Added this `read.me` file to document the snippet's current purpose, behavior, assumptions, and implementation notes.
+
+- Added the missing `tta_add_multi_variations` WordPress AJAX handler so logged-in matrix submissions no longer fall through to `admin-ajax.php` as a bad request.
+- Improved front-end AJAX response parsing so HTTP error responses with JSON messages are shown in `.tta-wm-msg`, successful responses can show the server-provided item count, and WooCommerce cart fragments are refreshed through the standard jQuery event when available.
